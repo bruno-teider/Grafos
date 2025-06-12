@@ -1,10 +1,9 @@
-# Grafo 2 - Ponderado nâo direcionado: Relações entre atores em uma obra
-#   Peso é queivalente a quantidade de colaborações em diferentes obras
-
-from collections import defaultdict
+from collections import defaultdict, deque, Counter
 from tqdm import tqdm
 import pandas as pd
 import heapq
+from matplotlib.ticker import MaxNLocator
+import matplotlib.pyplot as plt
 
 class GrafoDirecionado:
     def __init__(self):
@@ -57,7 +56,6 @@ class GrafoDirecionado:
             for ator in lista_atores:
                 for diretor in lista_diretores:
                     G.adiciona_aresta(ator, diretor)
-
 
     def imprime_lista_adjacencias(self):   
         final_text = "" 
@@ -120,75 +118,114 @@ class GrafoDirecionado:
                 componente = []
                 dfs_transposto(vertice, visitado, componente, GTransposto.grafo)
                 componentes.append(componente)
-    
+
+        # Contagem de vértices em cada componente
+        tamanhos_componentes = []
+
+        for componente in componentes:
+            tamanhos_componentes.append(len(componente))
+
+        contagem = Counter(tamanhos_componentes)
+
+        plt.bar(contagem.keys(), contagem.values(), color='mediumseagreen')
+        plt.title('Distribuição de Tamanhos dos Componentes Fortemente Conexos')
+        plt.xlabel('Tamanho do Componente')
+        plt.ylabel('Número de Componentes')
+        
+        # Force integer ticks on both axes
+        plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+        plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
+        
+        plt.tight_layout()
+        plt.show()
+
         return componentes
     
     #Exercício 4
-    def centralidade(self, vertice):
-        if vertice not in self.grafo: return 0
+    def centralidade(self, vertice_alvo): 
+        if vertice_alvo not in self.grafo: 
+            return 0
 
-        grau_saida = len(self.grafo[vertice])
-        grau_entrade = 0
+        grau_saida = len(self.grafo[vertice_alvo])
+        grau_entrada = 0
 
-        for vertice in self.grafo:
-            for adjacente, _ in self.grafo[vertice]:
-                if vertice == adjacente:
-                    grau_entrade += 1
+        for v in self.grafo:  
+            for adjacente, _ in self.grafo[v]:
+                if adjacente == vertice_alvo:
+                    grau_entrada += 1
 
-        grau_total = grau_saida + grau_entrade
+        grau_total = grau_saida + grau_entrada
         grau_maximo = 2 * (self.ordem - 1)
 
-        return grau_total / grau_maximo
+        return grau_total / grau_maximo if grau_maximo > 0 else 0
+
+    def maiores_centralidades(self):
+        centralidades = {}
+        # Pegamos apenas os graus de saída zero, ou seja, os diretores
+        vertices_grau_saida_zero = [v for v in self.grafo if len(self.grafo[v]) == 0]
+        
+        for vertice in tqdm(vertices_grau_saida_zero):
+            centralidade = self.centralidade(vertice)
+            centralidades[vertice] = centralidade
+
+        centralidades_ordenadas = sorted(centralidades.items(), key=lambda x: x[1], reverse=True)
+
+        print(f"Maiores Centralidades Diretores (vértices com grau de saída = 0")
+        for vertice, centralidade in centralidades_ordenadas[:10]:
+            print(f"{vertice}: {centralidade:.4f}")
 
     #Exercício 5
-    def bfs_caminhos_mais_curtos(self, vertice):
-        distancias = {}
-        caminhos = {}
-        visitados = {}  
-        for v in self.grafo:
-            distancias[v] = float('inf') 
-            caminhos[v] = []
-            visitados[v] = False
+    def bfs_caminhos_mais_curtos_contagem(self, origem):
+        distancia = {}
+        sigma = defaultdict(int)  # número de caminhos mais curtos
+        predecessores = defaultdict(list)
         
-        distancias[vertice] = 0
-        caminhos[vertice] = [[vertice]]
-        visitados[vertice] = True
-        fila = [vertice]
+        for v in self.grafo:
+            distancia[v] = float('inf')
+        
+        distancia[origem] = 0
+        sigma[origem] = 1
+        fila = deque([origem])
         
         while fila:
-            current = fila.pop(0)
+            v = fila.popleft()
+            for vizinho, _ in self.grafo[v]:
+                if distancia[vizinho] == float('inf'):
+                    distancia[vizinho] = distancia[v] + 1
+                    fila.append(vizinho)
+                if distancia[vizinho] == distancia[v] + 1:
+                    sigma[vizinho] += sigma[v]
+                    predecessores[vizinho].append(v)
+        
+        return distancia, sigma, predecessores
+  
+    def intermediacao(self, vertice_alvo):
+        if vertice_alvo not in self.grafo:
+            return 0.0
+        
+        intermedia = 0.0
+        vertices = list(self.grafo.keys())
 
-            for adj, _ in self.grafo[current]:
-                if not visitados[adj]:
-                    visitados[adj] = True
-                    fila.append(adj)    
-                if distancias[adj] > distancias[current] + 1:
-                    distancias[adj] = distancias[current] + 1
-                    caminhos[adj] = [caminho + [adj] for caminho in caminhos[current]]
-                elif distancias[adj] == distancias[current] + 1:
-                    for caminho in caminhos[current]:
-                        if caminho + [adj] not in caminhos[adj]:
-                            caminhos[adj].append(caminho + [adj])
-        return caminhos    
-    
-    def intermediacao(self, vertice):
-        resultado = 0
-        for v in self.grafo:
-            caminhos = self.bfs_caminhos_mais_curtos(v)
-            for destino in self.grafo:
-                if destino == v:
-                    continue
-                total_caminhos = len(caminhos[destino])
-                for caminho in caminhos[destino]:
-                    try:
-                        idx = caminho.index(vertice)
-                        if idx != 0 and idx != len(caminho) - 1:
-                            resultado += 1 / total_caminhos
-                    except ValueError:
-                        continue
-    
-        if not self.direcionado: return resultado / 2
-        return resultado
+        for s in vertices:
+            if s == vertice_alvo:
+                continue
+
+            dist, sigma, pred = self.bfs_caminhos_mais_curtos_contagem(s)
+            delta = defaultdict(float)
+            stack = [v for v in sorted(dist.keys(), key=lambda x: -dist[x]) if dist[v] < float('inf')]
+
+            for w in stack:
+                for v in pred[w]:
+                    c = (sigma[v] / sigma[w]) * (1 + delta[w])
+                    delta[v] += c
+                if w != s and w == vertice_alvo:
+                    intermedia += delta[w]
+
+        n = len(vertices)
+        if n <= 2:
+            return 0.0
+        else:
+            return intermedia / ((n - 1) * (n - 2))
     
     # Exercício 6
     def centralidade_proximidade(self, vertice):
@@ -215,6 +252,35 @@ class GrafoDirecionado:
 
         return centralidade_bruta
     
+    def distribuicao_grau(self):
+        grau_saida = defaultdict(int)
+        grau_entrada = defaultdict(int)
+
+        for vertice in self.grafo:
+            grau_saida[vertice] = len(self.grafo[vertice])
+            for adjacente, _ in self.grafo[vertice]:
+                grau_entrada[adjacente] += 1
+
+        # Após calcular grau_saida e grau_entrada
+        contagem_saida = Counter(grau_saida.values())
+        contagem_entrada = Counter(grau_entrada.values())
+
+        # Plotando os gráficos
+        fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+
+        axs[0].bar(contagem_saida.keys(), contagem_saida.values(), color='skyblue')
+        axs[0].set_title('Distribuição de Grau de Saída')
+        axs[0].set_xlabel('Grau de saída')
+        axs[0].set_ylabel('Número de vértices')
+        axs[1].bar(contagem_entrada.keys(), contagem_entrada.values(), color='salmon')
+        axs[1].set_title('Distribuição de Grau de Entrada')
+        axs[1].set_xlabel('Grau de entrada')
+        axs[1].set_ylabel('Número de vértices')
+        plt.tight_layout()
+        plt.show()
+
+        return grau_saida, grau_entrada
+    
 def grafoDirecionado():
     # Exercicio 1
     Grafo1 = GrafoDirecionado()
@@ -222,20 +288,23 @@ def grafoDirecionado():
     # Grafo1.imprime_lista_adjacencias()
     
     # Exercicio 2
-    componentes = Grafo1.componentes_fortemente_conexos()
-    print(f"Número componentes fortemente conexos: {len(componentes)}")
+    # componentes = Grafo1.componentes_fortemente_conexos()
+    # print(f"Número componentes fortemente conexos: {len(componentes)}")
     
-    # Exercício 4
-    centralidade = Grafo1.centralidade("ROBERT DOWNEY JR.")
-    print(f"Centralidade do vértice: {centralidade:.2f}")
+    # # Exercício 4
+    # centralidade = Grafo1.centralidade("ROBERT DOWNEY JR.")
+    # print(f"Centralidade do vértice: {centralidade:.2f}")
+    # maiores = Grafo1.maiores_centralidades()
     
-    # Exercício 5
-    intermediacao = Grafo1.intermediacao("ROBERT DOWNEY JR.")
-    print(f"Centralidade de intermediação do vértice: {intermediacao:.2f}")
+    # # Exercício 5
+    # intermediacao = Grafo1.intermediacao("ROBERT DOWNEY JR.")
+    # print(f"Centralidade de intermediação do vértice: {intermediacao:.2f}")
     
-    # Exercício 6
-    proximidade = Grafo1.centralidade_proximidade("YURI LOWENTHAL")
-    print(f"Centralidade de proximidade do vértice: {proximidade:.2f}")
+    # # Exercício 6
+    # proximidade = Grafo1.centralidade_proximidade("YURI LOWENTHAL")
+    # print(f"Centralidade de proximidade do vértice: {proximidade:.2f}")
+
+    # distribuicao_grau = Grafo1.distribuicao_grau()
 
 class GrafoNaoDirecionado():
     def __init__(self):
@@ -263,7 +332,7 @@ class GrafoNaoDirecionado():
             vertice, peso = self.grafo[origem][i]
             if vertice == destino:
                 peso += 1
-                self.grafo[origem][i] = (destino, peso + 1)
+                self.grafo[origem][i] = (destino, peso)
                 aresta_existe = True
                 break
             
@@ -272,7 +341,6 @@ class GrafoNaoDirecionado():
             for i in range(len(self.grafo[destino])):
                 vertice, peso = self.grafo[destino][i]
                 if vertice == origem:
-                    peso += 1
                     self.grafo[destino][i] = (origem, peso + 1)
                     break
             return
@@ -320,21 +388,46 @@ class GrafoNaoDirecionado():
     # Exercício 2
     def componentes_conexos(self):
         visitado = set()
+        componentes = []
         contador = 0
 
         for vertice in self.grafo:
             if vertice not in visitado:
                 contador += 1
-
+                componente_atual = []
                 pilha = [vertice]
 
                 while pilha:
                     v = pilha.pop()
                     if v not in visitado:
                         visitado.add(v)
+                        componente_atual.append(v)
                         for vizinho, _ in self.grafo[v]:
                             if vizinho not in visitado:
                                 pilha.append(vizinho)
+                
+                componentes.append(componente_atual)
+        
+        # Contagem de vértices em cada componente
+        tamanhos_componentes = []
+
+        for componente in componentes:
+            tamanhos_componentes.append(len(componente))
+            # print(f'Componente {contador}: {componente}')
+
+        contagem = Counter(tamanhos_componentes)
+
+        contagem_sem_gigante = {k: v for k, v in contagem.items() if k < 1000}
+
+        plt.bar(contagem_sem_gigante.keys(), contagem_sem_gigante.values(), color='mediumseagreen')
+        plt.title('Distribuição dos Componentes Conexos (sem o maior)')
+        plt.xlabel('Tamanho do Componente')
+        plt.ylabel('Número de Componentes')
+        plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
+        plt.gca().yaxis.set_major_locator(MaxNLocator(integer=True))
+        plt.tight_layout()
+        plt.show()
+        
         return contador
     
     # Exercício 3
@@ -358,78 +451,122 @@ class GrafoNaoDirecionado():
         return arestas
     
     # Exercício 4
-    def centralidade(self, vertice):
-        if vertice not in self.grafo: return 0
+    def centralidade_intermediacao(self, vertice_alvo): 
+        if vertice_alvo not in self.grafo: 
+            return 0
 
-        grau = len(self.grafo[vertice])
-        grau_maximo = 2 * (self.ordem - 1)
+        grau = len(self.grafo[vertice_alvo])
+        grau_maximo = self.ordem - 1
 
-        return grau / grau_maximo
+        return grau / grau_maximo if grau_maximo > 0 else 0
     
     def maior_centralidade(self):
         maior = 0
         nome = ''
         for vertice in self.grafo:
-            centralidade = self.centralidade(vertice)
+            centralidade = self.centralidade_intermediacao(vertice)
             if centralidade > maior:
                 maior = centralidade
                 nome = vertice
             
         print(f'Maior Centralidade: {nome} -> {maior}')
+    
+    def maiores_centralidades(self):
+        centralidades = {}
+        
+        for vertice in tqdm(self.grafo):
+            centralidade = self.centralidade_intermediacao(vertice)
+            centralidades[vertice] = centralidade
+
+        centralidades_ordenadas = sorted(centralidades.items(), key=lambda x: x[1], reverse=True)
+
+        print(f"Maiores Centralidades Atores")
+        for vertice, centralidade in centralidades_ordenadas[:10]:
+            print(f"{vertice}: {centralidade:.4f}")
 
     # Exercício 5
-    def centralidade_intermediacao_brandes(self, vertice):
-        if vertice not in self.grafo: return 0.0
-        n = len(self.grafo)
-        if n <= 2: return 0.0
-
+    def centralidade_intermediacao(self, vertice_alvo):
+        if vertice_alvo not in self.grafo:
+            return 0.0
+        
         vertices = list(self.grafo.keys())
-        intermediacao = 0.0
-
-        # Para cada vértice s como origem
-        for v in tqdm(vertices):
-            if v == vertice:
+        n = len(vertices)
+        
+        if n <= 2:
+            return 0.0
+        
+        betweenness = 0.0
+        
+        vertices_sample = vertices
+        
+        # Para cada vértice como fonte
+        for s in tqdm(vertices_sample, desc="Calculando intermediação"):
+            if s == vertice_alvo:
                 continue
+            
+            # Estruturas de dados otimizadas
+            predecessors = defaultdict(list) 
+            sigma = defaultdict(float)
+            distance = {}
+            delta = defaultdict(float)
+            
+            sigma[s] = 1.0
+            distance[s] = 0
+            
+            # BFS usando deque
+            queue = deque([s])
+            stack = []  # Para processar na ordem reversa
+            
+            # Fase 1: BFS para encontrar caminhos mais curtos
+            while queue:
+                v = queue.popleft()
+                stack.append(v)
+                
+                for neighbor, _ in self.grafo[v]:
+                    if neighbor not in distance:
+                        distance[neighbor] = distance[v] + 1
+                        queue.append(neighbor)
+                    
+                    # Caminho mais curto encontrado
+                    if distance[neighbor] == distance[v] + 1:
+                        sigma[neighbor] += sigma[v]
+                        predecessors[neighbor].append(v)
+            
+            # Fase 2: Acumulação (processar na ordem reversa)
+            while stack:
+                w = stack.pop()
+                
+                for v in predecessors[w]:
+                    # Calcula a contribuição de cada predecessor
+                    contribution = (sigma[v] / sigma[w]) * (1.0 + delta[w])
+                    delta[v] += contribution
+                
+                # Se w é o vértice de interesse e não é a fonte
+            if w != s and w == vertice_alvo:
+                betweenness += delta[w]
+        
+        if n > 2:
+            normalization = (n - 1) * (n - 2) / 2.0
+            betweenness = betweenness / normalization
+            
+            if len(vertices_sample) < n:
+                scaling_factor = n / len(vertices_sample)
+                betweenness = betweenness * scaling_factor
+        
+        return betweenness
 
-            pilha = []
-            predecessores = {w: [] for w in vertices}
-            caminhos_mais_curtos = {w: 0 for w in vertices} 
-            distâncias = {w: -1 for w in vertices}
-            dependencias = {w: 0 for w in vertices} 
+    def maiores_intermediacoes(self):
+        intermediacoes = {}
+        
+        for vertice in tqdm(self.grafo):
+            intermediacao = self.centralidade_intermediacao(vertice)
+            intermediacoes[vertice] = intermediacao
 
-            caminhos_mais_curtos[v] = 1
-            distâncias[v] = 0
-            fila_bfs = [v] 
+        intermediacoes_ordenadas = sorted(intermediacoes.items(), key=lambda x: x[1], reverse=True)
 
-            # BFS
-            while fila_bfs:
-                v = fila_bfs.pop(0)
-                pilha.append(v)
-
-                for v2, _ in self.grafo[v]:
-                    if distâncias[v2] < 0:
-                        fila_bfs.append(v2)
-                        distâncias[v2] = distâncias[v] + 1
-
-                    # Caminho mais curto para v2 via v
-                    if distâncias[v2] == distâncias[v] + 1:
-                        caminhos_mais_curtos[v2] += caminhos_mais_curtos[v]
-                        predecessores[v2].append(v)
-
-            while pilha:
-                v2 = pilha.pop()
-                for v in predecessores[v2]:
-                    dependencias[v] += (caminhos_mais_curtos[v] / caminhos_mais_curtos[v2]) * (1 + dependencias[v2])
-
-            # Soma contribuição para o vértice de interesse
-            for v2 in vertices:
-                if v2 != v and v2 != vertice:
-                    intermediacao += dependencias[v2]
-
-        # Normalizar valor entre 0 e 1
-        normalizacao = (n - 1) * (n - 2) / 2
-        return intermediacao / normalizacao
-    
+        print(f"Maiores Intermediações Atores")
+        for vertice, intermediacao in intermediacoes_ordenadas[:10]:
+            print(f"{vertice}: {intermediacao:.4f}")
 
     # Exercício 6
     def centralidade_proximidade(self, vertice):
@@ -454,6 +591,36 @@ class GrafoNaoDirecionado():
         centralidade_bruta = num_vertices_alcancaveis / soma_distancias
 
         return centralidade_bruta
+    
+    def maiores_proximidades(self):
+        proximidades = {}
+        
+        for vertice in tqdm(self.grafo):
+            proximidade = self.centralidade_proximidade(vertice)
+            proximidades[vertice] = proximidade
+
+        proximidades_ordenadas = sorted(proximidades.items(), key=lambda x: x[1], reverse=True)
+
+        print(f"Maiores Proximidades Atores")
+        for vertice, proximidade in proximidades_ordenadas[:10]:
+            print(f"{vertice}: {proximidade:.4f}")
+
+    def distribuicao_grau_nao_direcionado(self):
+        grau = defaultdict(int)
+
+        for vertice in self.grafo:
+            grau[vertice] = len(self.grafo[vertice])
+
+        contagem = Counter(grau.values())
+
+        plt.bar(contagem.keys(), contagem.values(), color='mediumseagreen')
+        plt.title('Distribuição de Grau (Grafo Não Direcionado)')
+        plt.xlabel('Grau')
+        plt.ylabel('Número de vértices')
+        plt.tight_layout()
+        plt.show()
+
+        return grau
 
 def grafoNaoDirecionado():
     # Exercicio 1
@@ -461,29 +628,34 @@ def grafoNaoDirecionado():
     Grafo2.inserir_dados()
     # Grafo2.imprime_lista_adjacencias()
 
-    # Exercício 2
-    componentes = Grafo2.componentes_conexos()
-    print(f"Número de componentes conexos: {componentes}")
+    # # Exercício 2
+    # componentes = Grafo2.componentes_conexos()
+    # print(f"Número de componentes conexos: {componentes}")
 
-    # Exercicio 3
-    arestas = Grafo2.arvore_geradora_minima("JOÃO MIGUEL")
-    print("Arestas da árvore geradora mínima:")
-    for origem, destino, peso in arestas:
-        print(f"{origem} - {destino} (Peso: {peso})")
+    # # Exercicio 3
+    # arestas = Grafo2.arvore_geradora_minima("JOÃO MIGUEL")
+    # print("Arestas da árvore geradora mínima:")
+    # for origem, destino, peso in arestas:
+    #     print(f"{origem} - {destino} (Peso: {peso})")
 
-    # Exercicio 4
-    centralidade = Grafo2.centralidade("NORMAN REEDUS")
-    print(f"Centralidade do vértice: {centralidade}")
-    Grafo2.maior_centralidade()
+    # # Exercicio 4
+    # centralidade = Grafo2.centralidade("NORMAN REEDUS")
+    # print(f"Centralidade do vértice: {centralidade}")
+    #Grafo2.maior_centralidade()
 
     # Exercicio 5
-    # intermediacao = Grafo2.centralidade_intermediacao_brandes("NORMAN REEDUS")
+    # intermediacao = Grafo2.centralidade_intermediacao("ROBERT DOWNEY JR.")
     # print(f"Centralidade de intermediação do vértice: {intermediacao:.2f}")
 
     # Exercicio 6
-    proximidade = Grafo2.centralidade_proximidade("NORMAN REEDUS")
-    print(f"Centralidade de proximidade do vértice: {proximidade:.2f}")
+    # proximidade = Grafo2.centralidade_proximidade("NORMAN REEDUS")
+    # print(f"Centralidade de proximidade do vértice: {proximidade:.2f}")
+
+    # distribuicao_grau = Grafo2.distribuicao_grau_nao_direcionado()
+    #Ex6 = Grafo2.maiores_centralidades()
+    #Ex7 = Grafo2.maiores_intermediacoes()
+    Ex8 = Grafo2.maiores_proximidades()
 
 # --X-- Main --X--
-# grafoDirecionado*()
+# grafoDirecionado()
 grafoNaoDirecionado()
