@@ -4,6 +4,8 @@ import pandas as pd
 import heapq
 from matplotlib.ticker import MaxNLocator
 import matplotlib.pyplot as plt
+import gc
+import numpy as np
 
 class GrafoDirecionado:
     def __init__(self):
@@ -484,89 +486,104 @@ class GrafoNaoDirecionado():
         for vertice, centralidade in centralidades_ordenadas[:10]:
             print(f"{vertice}: {centralidade:.4f}")
 
-    # Exercício 5
-    def centralidade_intermediacao(self, vertice_alvo):
-        if vertice_alvo not in self.grafo:
-            return 0.0
+    # Exercício 5 / 7
+    def intermediacoes_brandes(self):
+        # Converte vértices para lista para processamento eficiente
+        lista_vertices = list(self.grafo.keys())
+        total_vertices = len(lista_vertices)
+        tamanho_chunk = 1000
         
-        vertices = list(self.grafo.keys())
-        n = len(vertices)
+        # Inicializa usando numpy para ser rodável
+        centralidade_intermediacao = np.zeros(total_vertices, dtype=np.float64)
+        mapeamento_vertice_para_indice = {vertice: indice for indice, vertice in enumerate(lista_vertices)}
         
-        if n <= 2:
-            return 0.0
+        # Processa em chunks para conseguir rodar
+        total_chunks = (total_vertices + tamanho_chunk - 1) // tamanho_chunk
+        barra_progresso = tqdm(total=total_vertices, desc="Calculando intermediacao")
         
-        betweenness = 0.0
-        
-        vertices_sample = vertices
-        
-        # Para cada vértice como fonte
-        for s in tqdm(vertices_sample, desc="Calculando intermediação"):
-            if s == vertice_alvo:
-                continue
+        for numero_chunk in range(total_chunks):
+            indice_inicial_chunk = numero_chunk * tamanho_chunk
+            indice_final_chunk = min((numero_chunk + 1) * tamanho_chunk, total_vertices)
+            vertices_do_chunk = lista_vertices[indice_inicial_chunk:indice_final_chunk]
             
-            # Estruturas de dados otimizadas
-            predecessors = defaultdict(list) 
-            sigma = defaultdict(float)
-            distance = {}
-            delta = defaultdict(float)
-            
-            sigma[s] = 1.0
-            distance[s] = 0
-            
-            # BFS usando deque
-            queue = deque([s])
-            stack = []  # Para processar na ordem reversa
-            
-            # Fase 1: BFS para encontrar caminhos mais curtos
-            while queue:
-                v = queue.popleft()
-                stack.append(v)
+            # Processa cada vértice no chunk
+            for vertice_origem in vertices_do_chunk:
+                indice_vertice_origem = mapeamento_vertice_para_indice[vertice_origem]
                 
-                for neighbor, _ in self.grafo[v]:
-                    if neighbor not in distance:
-                        distance[neighbor] = distance[v] + 1
-                        queue.append(neighbor)
+                # Estruturas de dados para Brandes
+                pilha_ordem_visitacao = []
+                lista_predecessores = [[] for _ in range(total_vertices)]
+                contador_caminhos_curtos = np.zeros(total_vertices, dtype=np.float64)
+                contador_caminhos_curtos[indice_vertice_origem] = 1.0
+                distancias_minimas = np.full(total_vertices, -1, dtype=np.int32)
+                distancias_minimas[indice_vertice_origem] = 0
+                dependencia_parcial = np.zeros(total_vertices, dtype=np.float64)
+                
+                # BFS
+                fila_bfs = deque([indice_vertice_origem])
+                
+                while fila_bfs:
+                    indice_vertice_atual = fila_bfs.popleft()
+                    pilha_ordem_visitacao.append(indice_vertice_atual)
+                    vertice_atual = lista_vertices[indice_vertice_atual]
                     
-                    # Caminho mais curto encontrado
-                    if distance[neighbor] == distance[v] + 1:
-                        sigma[neighbor] += sigma[v]
-                        predecessors[neighbor].append(v)
-            
-            # Fase 2: Acumulação (processar na ordem reversa)
-            while stack:
-                w = stack.pop()
+                    # Itera sobre vizinhos do vértice atual
+                    for vertice_vizinho, _ in self.grafo[vertice_atual]:
+                        indice_vertice_vizinho = mapeamento_vertice_para_indice[vertice_vizinho]
+                        
+                        # Se for primeira vez visitando o vizinho
+                        if distancias_minimas[indice_vertice_vizinho] < 0:
+                            fila_bfs.append(indice_vertice_vizinho)
+                            distancias_minimas[indice_vertice_vizinho] = distancias_minimas[indice_vertice_atual] + 1
+                        
+                        # Se encontrou caminho mais curto para vizinho passando pelo vértice atual
+                        if distancias_minimas[indice_vertice_vizinho] == distancias_minimas[indice_vertice_atual] + 1:
+                            contador_caminhos_curtos[indice_vertice_vizinho] += contador_caminhos_curtos[indice_vertice_atual]
+                            lista_predecessores[indice_vertice_vizinho].append(indice_vertice_atual)
                 
-                for v in predecessors[w]:
-                    # Calcula a contribuição de cada predecessor
-                    contribution = (sigma[v] / sigma[w]) * (1.0 + delta[w])
-                    delta[v] += contribution
+                # Acumulação: processa vértices em ordem reversa
+                while pilha_ordem_visitacao:
+                    indice_vertice_processado = pilha_ordem_visitacao.pop()
+                    
+                    for indice_predecessor in lista_predecessores[indice_vertice_processado]:
+                        if contador_caminhos_curtos[indice_vertice_processado] > 0:
+                            proporcao_caminhos = contador_caminhos_curtos[indice_predecessor] / contador_caminhos_curtos[indice_vertice_processado]
+                            dependencia_parcial[indice_predecessor] += proporcao_caminhos * (1.0 + dependencia_parcial[indice_vertice_processado])
+                    
+                    # Acumula centralidade (exceto para o vértice origem)
+                    if indice_vertice_processado != indice_vertice_origem:
+                        centralidade_intermediacao[indice_vertice_processado] += dependencia_parcial[indice_vertice_processado]
                 
-                # Se w é o vértice de interesse e não é a fonte
-            if w != s and w == vertice_alvo:
-                betweenness += delta[w]
-        
-        if n > 2:
-            normalization = (n - 1) * (n - 2) / 2.0
-            betweenness = betweenness / normalization
+                barra_progresso.update(1)
             
-            if len(vertices_sample) < n:
-                scaling_factor = n / len(vertices_sample)
-                betweenness = betweenness * scaling_factor
+            # Limpa memória após cada chunk
+            gc.collect()
         
-        return betweenness
+        barra_progresso.close()
+        
+        # Converte de volta para dicionário
+        resultado_centralidades = {
+            lista_vertices[indice]: centralidade_intermediacao[indice] 
+            for indice in range(total_vertices)
+        }
+        
+        for vertice in resultado_centralidades:
+            resultado_centralidades[vertice] /= 2.0
+        
+        return resultado_centralidades
 
     def maiores_intermediacoes(self):
-        intermediacoes = {}
-        
-        for vertice in tqdm(self.grafo):
-            intermediacao = self.centralidade_intermediacao(vertice)
-            intermediacoes[vertice] = intermediacao
-
-        intermediacoes_ordenadas = sorted(intermediacoes.items(), key=lambda x: x[1], reverse=True)
-
-        print(f"Maiores Intermediações Atores")
+        intermediacoes = self.intermediacoes_brandes()
+        intermediacoes_ordenadas = sorted(
+            intermediacoes.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )
+        print("Maiores Intermediações (Algoritmo de Brandes)")
         for vertice, intermediacao in intermediacoes_ordenadas[:10]:
             print(f"{vertice}: {intermediacao:.4f}")
+        
+        return intermediacoes_ordenadas
 
     # Exercício 6
     def centralidade_proximidade(self, vertice):
@@ -653,8 +670,8 @@ def grafoNaoDirecionado():
 
     # distribuicao_grau = Grafo2.distribuicao_grau_nao_direcionado()
     #Ex6 = Grafo2.maiores_centralidades()
-    #Ex7 = Grafo2.maiores_intermediacoes()
-    Ex8 = Grafo2.maiores_proximidades()
+    Ex7 = Grafo2.maiores_intermediacoes()
+    # Ex8 = Grafo2.maiores_proximidades()
 
 # --X-- Main --X--
 # grafoDirecionado()
