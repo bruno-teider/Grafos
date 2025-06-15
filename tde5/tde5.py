@@ -567,8 +567,10 @@ class GrafoNaoDirecionado():
             for indice in range(total_vertices)
         }
         
+        fator_normalizacao = (self.ordem - 1) * (self.ordem - 2) / 2.0
+
         for vertice in resultado_centralidades:
-            resultado_centralidades[vertice] /= 2.0
+            resultado_centralidades[vertice] /= fator_normalizacao
         
         return resultado_centralidades
 
@@ -670,8 +672,9 @@ def grafoNaoDirecionado():
 
     # distribuicao_grau = Grafo2.distribuicao_grau_nao_direcionado()
     #Ex6 = Grafo2.maiores_centralidades()
-    Ex7 = Grafo2.maiores_intermediacoes()
+    # Ex7 = Grafo2.maiores_intermediacoes()
     # Ex8 = Grafo2.maiores_proximidades()
+
 
 # --X-- Main --X--
 # grafoDirecionado()
